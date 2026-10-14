@@ -1,147 +1,64 @@
 #!/usr/bin/env python3
-
-from __future__ import print_function
+"""REST benchmark: python rest-client.py HOST METHOD REPS"""
+import argparse
+import base64
+import random
+import time
+from pathlib import Path
 
 import requests
-import json
-import time
-import base64
-import jsonpickle
-import random
-import argparse
+
+METHODS = ('add', 'rawImage', 'dotProduct', 'jsonImage')
+IMAGE_PATH = Path(__file__).with_name('Flatirons_Winter_Sunrise_edit_2.jpg')
 
 
-def doRawImage(addr, debug=False):
+def main():
+    parser = argparse.ArgumentParser(description='Lab 6 REST client')
+    parser.add_argument('host', help='localhost or server INTERNAL IP')
+    parser.add_argument('cmd', choices=METHODS)
+    parser.add_argument('reps', type=int)
+    parser.add_argument('-p', '--port', type=int, default=5000)
+    args = parser.parse_args()
+    if args.reps < 1:
+        parser.error('reps must be >= 1')
 
-    # prepare headers for http request
-    headers = {'content-type': 'image/png'}
+    base_url = f'http://{args.host}:{args.port}'
+    a = [random.random() for _ in range(100)]
+    b = [random.random() for _ in range(100)]
+    expected_dot = sum(x * y for x, y in zip(a, b))
+    image = IMAGE_PATH.read_bytes() if args.cmd in ('rawImage', 'jsonImage') else None
+    encoded = base64.b64encode(image).decode('ascii') if image is not None else None
 
-    img = open('Flatirons_Winter_Sunrise_edit_2.jpg', 'rb').read()
+    def call():
+        # Each requests.post call uses a new connection (no persistent Session).
+        if args.cmd == 'add':
+            response = requests.post(f'{base_url}/api/add/5/10', timeout=30)
+        elif args.cmd == 'rawImage':
+            response = requests.post(f'{base_url}/api/rawimage', data=image,
+                                     headers={'Content-Type': 'image/jpeg'}, timeout=30)
+        elif args.cmd == 'dotProduct':
+            response = requests.post(f'{base_url}/api/dotproduct',
+                                     json={'a': a, 'b': b}, timeout=30)
+        else:
+            response = requests.post(f'{base_url}/api/jsonimage',
+                                     json={'image': encoded}, timeout=30)
+        response.raise_for_status()
+        return response.json()
 
-    # send http request with image and receive response
-    image_url = addr + '/api/rawimage'
-    response = requests.post(image_url, data=img, headers=headers)
-
-    if debug:
-        print("Response is", response)
-        print(json.loads(response.text))
-
-
-def doAdd(addr, debug=False):
-
-    headers = {'content-type': 'application/json'}
-
-    # send http request with image and receive response
-    add_url = addr + "/api/add/5/10"
-    response = requests.post(add_url, headers=headers)
-
-    if debug:
-        print("Response is", response)
-        print(json.loads(response.text))
-
-
-def doDotProduct(addr, debug=False):
-    pass
-
-
-def doJsonImage(addr, debug=False):
-    pass
-
-
-# ---------------------------------------------------------
-# Parse command-line arguments
-# ---------------------------------------------------------
-
-parser = argparse.ArgumentParser(
-    description='REST client for measuring server operations'
-)
-
-parser.add_argument(
-    'host',
-    help='IP address or hostname of the REST server'
-)
-
-parser.add_argument(
-    'cmd',
-    choices=['add', 'rawImage', 'dotProduct', 'jsonImage'],
-    help='Operation to perform'
-)
-
-parser.add_argument(
-    'reps',
-    type=int,
-    help='Number of repetitions for measurement'
-)
-
-parser.add_argument(
-    '-p', '--port',
-    type=int,
-    default=5000,
-    help='Server port (default: 5000)'
-)
-
-parser.add_argument(
-    '-d', '--debug',
-    action='store_true',
-    help='Print the response from the server'
-)
-
-args = parser.parse_args()
-
-
-# ---------------------------------------------------------
-# Build server address
-# ---------------------------------------------------------
-
-addr = f"http://{args.host}:{args.port}"
-
-print(f"Running {args.reps} reps against {addr}")
-
-
-# ---------------------------------------------------------
-# Perform requested operation
-# ---------------------------------------------------------
-
-if args.cmd == 'rawImage':
+    warmup = call()
+    if args.cmd == 'add':
+        assert int(warmup['sum']) == 15
+    elif args.cmd == 'dotProduct':
+        assert abs(warmup['dotproduct'] - expected_dot) < 0.001
+    else:
+        assert warmup['width'] > 0 and warmup['height'] > 0
 
     start = time.perf_counter()
-
-    for x in range(args.reps):
-        doRawImage(addr, debug=args.debug)
-
-    delta = ((time.perf_counter() - start) / args.reps) * 1000
-    print("Took", delta, "ms per operation")
+    for _ in range(args.reps):
+        call()
+    avg_ms = (time.perf_counter() - start) * 1000 / args.reps
+    print(f'REST {args.cmd}: {avg_ms:.3f} ms/op ({args.reps} requests, server={args.host})')
 
 
-elif args.cmd == 'add':
-
-    start = time.perf_counter()
-
-    for x in range(args.reps):
-        doAdd(addr, debug=args.debug)
-
-    delta = ((time.perf_counter() - start) / args.reps) * 1000
-    print("Took", delta, "ms per operation")
-
-
-elif args.cmd == 'jsonImage':
-
-    start = time.perf_counter()
-
-    for x in range(args.reps):
-        doJsonImage(addr, debug=args.debug)
-
-    delta = ((time.perf_counter() - start) / args.reps) * 1000
-    print("Took", delta, "ms per operation")
-
-
-elif args.cmd == 'dotProduct':
-
-    start = time.perf_counter()
-
-    for x in range(args.reps):
-        doDotProduct(addr, debug=args.debug)
-
-    delta = ((time.perf_counter() - start) / args.reps) * 1000
-    print("Took", delta, "ms per operation")
-
+if __name__ == '__main__':
+    main()

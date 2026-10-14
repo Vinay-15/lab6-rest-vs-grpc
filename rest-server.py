@@ -1,78 +1,63 @@
 #!/usr/bin/env python3
-
-from flask import Flask, request, Response
-import jsonpickle
-from PIL import Image
-import io
+"""REST endpoints required by CSCI 5253 Lab 6."""
 import argparse
-
-# Initialize the Flask application
-app = Flask(__name__)
-
+import base64
+import io
 import logging
-log = logging.getLogger('werkzeug')
-log.setLevel(logging.DEBUG)
+
+from flask import Flask, jsonify, request
+from PIL import Image
+
+app = Flask(__name__)
+logging.getLogger('werkzeug').setLevel(logging.ERROR)
+
+
+def image_size(data):
+    with Image.open(io.BytesIO(data)) as image:
+        width, height = image.size
+    return {'width': width, 'height': height}
 
 
 @app.route('/api/add/<int:a>/<int:b>', methods=['GET', 'POST'])
 def add(a, b):
-    response = {'sum': str(a + b)}
-    response_pickled = jsonpickle.encode(response)
-    return Response(
-        response=response_pickled,
-        status=200,
-        mimetype="application/json"
-    )
+    return jsonify({'sum': str(a + b)})
 
 
 @app.route('/api/rawimage', methods=['POST'])
 def rawimage():
-    r = request
-
-    # Convert the data to a PIL image type so we can extract dimensions
     try:
-        ioBuffer = io.BytesIO(r.data)
-        img = Image.open(ioBuffer)
-
-        response = {
-            'width': img.size[0],
-            'height': img.size[1]
-        }
-    except:
-        response = {'width': 0, 'height': 0}
-
-    response_pickled = jsonpickle.encode(response)
-    return Response(
-        response=response_pickled,
-        status=200,
-        mimetype="application/json"
-    )
+        return jsonify(image_size(request.data))
+    except Exception:
+        return jsonify({'width': 0, 'height': 0}), 400
 
 
 @app.route('/api/dotproduct', methods=['POST'])
 def dotproduct():
-    pass
+    payload = request.get_json(silent=True) or {}
+    a = payload.get('a')
+    b = payload.get('b')
+    if not isinstance(a, list) or not isinstance(b, list) or len(a) != len(b):
+        return jsonify({'error': 'a and b must be lists of equal length'}), 400
+    try:
+        value = sum(float(x) * float(y) for x, y in zip(a, b))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Vectors must contain numbers'}), 400
+    return jsonify({'dotproduct': value})
 
 
 @app.route('/api/jsonimage', methods=['POST'])
 def jsonimage():
-    pass
+    payload = request.get_json(silent=True) or {}
+    try:
+        encoded = payload['image']
+        data = base64.b64decode(encoded, validate=True)
+        return jsonify(image_size(data))
+    except Exception:
+        return jsonify({'width': 0, 'height': 0}), 400
 
 
 if __name__ == '__main__':
-    # Parse command-line arguments
-    parser = argparse.ArgumentParser(
-        description='Flask REST server'
-    )
-
-    parser.add_argument(
-        '-p', '--port',
-        type=int,
-        default=5000,
-        help='Port on which to run the server (default: 5000)'
-    )
-
+    parser = argparse.ArgumentParser(description='Lab 6 REST server')
+    parser.add_argument('-p', '--port', type=int, default=5000)
     args = parser.parse_args()
-
-    # Start Flask app
-    app.run(host='0.0.0.0', port=args.port)
+    app.run(host='0.0.0.0', port=args.port, debug=False)
